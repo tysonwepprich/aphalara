@@ -1,0 +1,5 @@
+temperature,n,preovip_day_est,ovip_day_est,fecund_daily_est,fecund_female_est,longev_day_female_est,longev_day_male_est,preovip_day_se,ovip_day_se,fecund_daily_se,fecund_female_se,longev_day_female_se,longev_day_male_se
+15,20,8.1,60,9.8,579.2,68.1,59.9,0.4,2.9,0.5,34.6,3,4
+20,20,4.6,49.9,13.5,672.5,54.5,38.4,0.2,1,0.5,24.7,1,2.5
+25,20,4.5,48,15.3,727.4,52.5,38.9,0.2,1.7,0.7,31.9,1.7,2.6
+30,10,2.5,12.1,2.2,57.7,24,28.1,0.9,4.6,0.9,23.3,3.7,3.3

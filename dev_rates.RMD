@@ -1,0 +1,207 @@
+---
+title: "Temperature dependent development"
+author: "Tyson Wepprich"
+date: "November 16, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(devRate)
+library(stringr)
+library(lubridate)
+
+```
+
+## Goals
+Analyze three lab studies of Aphalara development and survival rates at different temperature treatments. Compare linear and nonlinear temperature dependence of growth rates. Possibly combine the three studies' results for optimal physiological parameter estimates.
+
+## The data
+First, I need to transform data for analysis from different formats in 3 studies.
+
+```{r data munging}
+# myint
+rawdat <- read.csv("data/dev_myint.csv", header = TRUE)
+
+# combine male and females
+# just do full development from egg to emerging adult
+# simulate individual data?
+myint_dev <- rawdat %>% 
+  group_by(sex, temperature) %>% 
+  do(simdata = rnorm(n = .$n, mean = .$total_mean, sd = .$total_se * sqrt(.$n))) %>% 
+  unnest() %>% 
+  mutate(time1 = round(simdata),
+         temp2 = temperature,
+         time2 = 0,
+         n = 1,
+         censored = 0)
+
+# shaw
+fs <- list.files(path = "data", full.names = TRUE)
+fs <- fs[grep(pattern = "shaw", x = fs, fixed = TRUE)]
+shaw_list <- list()
+for (i in fs){
+  tmp <- read_csv(i, col_names = FALSE)
+  startdate <- str_split_fixed(tmp[1, 2], pattern = "-", 2)[2]
+  startdate <- dmy(sub(pattern = ".", replacement = "/", x = startdate, fixed = TRUE))
+  temperature <- as.numeric(str_split_fixed(string = str_split_fixed(string = i, pattern = "_", n = 3)[3], pattern = ".csv", n = 2)[1])
+  
+  nms <- tmp[3, ] %>% mutate_all(as.character)
+  dat <- tmp[-c(1:3), ]
+  names(dat) <- nms
+  dat <- dat %>% 
+    gather(key = enddate, value = n, 3:ncol(.)) %>% 
+    mutate(enddate = dmy(enddate),
+           time1 = enddate - startdate,
+           temperature = temperature)
+  shaw_list[[length(shaw_list) + 1]] <- dat
+}
+shaw_dev <- bind_rows(shaw_list) %>%
+  rename(neggs = `number of eggs`) %>% 
+  mutate(n = as.numeric(n),
+         time1 = as.numeric(time1)) %>% 
+  filter(complete.cases(.))
+shaw_dev <- shaw_dev[rep(seq(nrow(shaw_dev)), shaw_dev$n), c("rep", "time1", "temperature")]
+
+
+# temperature transfer
+rawdat <- read_csv("data/dev_transfer.csv")
+transfer_dev <- rawdat %>% 
+  gather(key = enddate, value = n, `14/07/08`:ncol(rawdat)) %>% 
+  mutate(time_all = as.numeric(dmy(enddate) - mdy(eggslaid)),
+         temperature = tempto, 
+         temp2 = 15,
+         time1 = 30, 
+         time2 = time_all - 30) %>% 
+  filter(n > 0)
+trans_dev <- transfer_dev[rep(seq(nrow(transfer_dev)), transfer_dev$n), 
+                          c("plant", "run", "time1", "time2", "temperature", "temp2")]
+
+
+# lots of variation in control 15C transfer emergence
+plt <- ggplot(trans_dev, aes(x = time2)) + 
+  geom_histogram() +
+  # facet_wrap(~temperature, ncol = 1) +
+  facet_grid(run~temperature) +
+  theme_bw()
+plt
+```
+## Analyze with devRate R package
+
+```{r devRate}
+# linear models
+mod_lin_myint <- devRateModel(eq = lamb_92,
+                              temp = myint_dev$temperature,
+                              devRate = myint_dev$time1^-1,
+                              startValues <- list(list(Rm = 0.05, Tmax = 30, To = 10), list(T1 = 4)))
+devRatePlot(eq = lamb_92, nlsDR = mod_lin_myint, temp = myint_dev$temperature, devRate = myint_dev$time1^-1)
+
+mod_lin_shaw <- devRateModel(eq = campbell_74,
+                              temp = shaw_dev$temperature,
+                              devRate = shaw_dev$time1^-1)
+devRatePlot(eq = campbell_74, nlsDR = mod_lin_shaw, temp = shaw_dev$temperature, devRate = shaw_dev$time1^-1)
+
+
+
+```
+
+## Plot all 3 with linear models
+
+```{r linear}
+
+mean15 <- trans_dev %>% 
+  filter(temperature == 15) %>% 
+  mutate(time1 = time1 + time2,
+         devRate = 1 / time1)
+mean15 <- mean(mean15$devRate)
+
+trans_dev <- trans_dev %>% 
+  mutate(devRate = (1 - time2 * mean15) / time1,
+         experiment = "transfer") %>%
+  select(temperature, devRate, experiment)
+shaw_dev <- shaw_dev %>% 
+  mutate(devRate = 1 / time1,
+         experiment = "shaw") %>% 
+  select(temperature, devRate, experiment)
+myint_dev <- myint_dev %>% 
+  mutate(devRate = 1 / time1,
+         experiment = "myint") %>% 
+  select(temperature, devRate, experiment)
+
+alldat <- bind_rows(trans_dev, shaw_dev, myint_dev)
+
+rawplt <- ggplot(alldat, aes(x = temperature, y = devRate, color = experiment)) +
+  geom_jitter(alpha = .3)
+rawplt
+
+```
+
+## Linear predictions
+
+```{r plot preds}
+lindat <- alldat %>% 
+  filter(temperature != 30)
+mod <- lm(devRate ~ temperature * experiment, data = lindat)
+
+newdat <- expand.grid(c("myint", "shaw", "transfer"), seq(0, 30, .1))
+names(newdat) <- c("experiment", "temperature")
+
+newdat$devRate <- predict.lm(mod, newdat)
+newdat <- newdat %>% filter(devRate >= 0)
+
+tempmod <- lm(devRate ~ temperature, data = lindat)
+tempdat <- data.frame(temperature = seq(0, 30, .1))
+tempdat$devRate <- predict.lm(tempmod, tempdat)
+tempdat <- tempdat %>% filter(devRate >= 0)
+
+test <- rawplt +
+  geom_line(data = newdat, aes(x = temperature, y = devRate, group = experiment)) +
+  geom_line(data = tempdat, aes(x = temperature, y = devRate), color = "black") +
+  theme_bw() +
+  ggtitle("Aphalara daily development rate vs constant temperatures")
+test
+ggsave(filename = "AphaDevRate.png", plot = test, device = "png", width = 6, height = 5)
+
+```
+
+
+
+## Analyze nonlinear
+Trying to emulate Regniere et al 2012 SAS code.
+
+```{r nonlinear}
+
+library(nlme)
+
+
+mod <- nlme(model = epsij ~ log(pnorm(q = epsij, 
+                                      mean = (-0.5 * s_eps * s_eps), 
+                                      sd = s_eps) - pnorm(q = epsm1,
+                                                          mean = (-0.5 * s_eps * s_eps),
+data <- myint_dev
+regniere_negLL <- function(params){
+  # sig_eps <- params[1]
+  # sig_ups <- params[2]
+  psi <- params[1]
+  Tb <- params[2]
+  Tm <- params[3]
+  omega <- params[4]
+  
+  tau <- 1 / (psi * temperature * (temperature - Tb) * (Tm - temperature) ^ omega)
+  
+  lik <- 0
+  for (i in 1:nrow(data)){
+    for (j in 1:length(unique(temperature))){
+      
+      q <- pnorm(q = )
+      
+    }
+  }
+  
+  
+}
+
+
+```
+
