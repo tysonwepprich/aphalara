@@ -9,7 +9,7 @@ library(viridis)
 library(readxl)
 library(magrittr)
 
-dat <- readxl::read_xlsx("C:/Users/wepprict/Downloads/Aphalara_GC_2018.xlsx", na = "NA")
+dat <- readxl::read_xlsx("data/Aphalara_GC_2018.xlsx", na = "NA")
 
 # what to do about unknown starting # of adults in each tray?
 # we know the # moved and # dead when dishes transferred for 14C trays on 8/2,
@@ -66,7 +66,7 @@ dat <- dat %>%
   filter(is.na(OvipRate) == FALSE)
 
 
-theme_set(theme_bw(base_size = 20)) 
+theme_set(theme_bw(base_size = 22)) 
 
 # can change y to be based on day or degree-day
 plt <- ggplot(dat, aes(x = AccumDD, y = OvipRateDD, group = Photoperiod, color = Photoperiod)) +
@@ -123,11 +123,18 @@ gammod1 <- gam(NewEggs ~
               data = dat, offset = RateOffset,
               family = nb(link = "log"))
 
+# for mapping, just try southern strain, no difference in temperature
+dat <- dat %>% filter(Population == "S")
+gammod1 <- gam(NewEggs ~ 
+                 s(NumAdults) +
+                 te(AccumDD, Photoperiod, k = c(5, 4)),
+               data = dat, offset = RateOffset,
+               family = nb(link = "log"))
 
 newdat <- expand.grid(AccumDD = seq(0, 300, length.out = 150),
-                      Photoperiod = seq(10, 16, length.out = 100),
+                      Photoperiod = seq(10, 16, length.out = 6),
                       TrtFactor = unique(dat$TrtFactor),
-                      RateOffset = log(2 * 10),
+                      RateOffset = log(1),
                       NumAdults = 25)
 newdat <- newdat[-which(newdat$AccumDD > 250 & newdat$TrtFactor %in% c("N_14", "S_14")), ]
 newdat$pred <- predict(gammod1, newdata = newdat, type = "response")
@@ -136,16 +143,32 @@ newdat$Temperature <- stringr::str_split_fixed(newdat$TrtFactor, pattern = "_", 
 
 
 preds <- ggplot(newdat, aes(x = AccumDD, y = pred, group = Photoperiod, color = Photoperiod)) +
-  geom_line() +
-  scale_color_viridis() +
-  facet_wrap(Population~Temperature, scales = "free_y") +
-  ggtitle("Modeled oviposition rate (eggs/pair/10 degree-days)") +
-  ylab("Model predictions (note different scales)")
+  geom_line(size = 2) +
+  scale_color_viridis(breaks = seq(10, 16, length.out = 3)) +
+  # facet_wrap(Population~Temperature, scales = "free_y") +
+  ggtitle("Modeled oviposition rate (eggs/degree-day/adult)") +
+  ylab("Predicted oviposition rate") +
+  xlab("Accumulated degree-days (7C base)") +
+  theme(legend.position = c(.2, .7), legend.direction = "vertical", plot.title = element_text(hjust = 0.5))
 
 preds
 
+plt <- ggplot(dat, aes(x = AccumDD, y = OvipRateDD, group = Photoperiod, color = Photoperiod)) +
+  geom_point(size = 4, alpha = .7) +
+  scale_color_viridis(breaks = seq(10, 16, length.out = 3)) +
+  xlab("Accumulated degree-days (7C base)") +
+  ylab("Observed oviposition rate") +
+  ggtitle("Oviposition rate (eggs/degree-day/adult)") +
+  theme(legend.position = c(.2, .7), legend.direction = "vertical", plot.title = element_text(hjust = 0.5))
+
+plt
+
+
 
 write.csv(dat, file = "APHA_GC_ovip.csv", row.names = FALSE)
-ggsave("APHA_ovip_rate.png", plot = plt, device = "png", height = 9, width = 9, units = "in")
-ggsave("APHA_ovip_model.png", plot = preds, device = "png", height = 9, width = 9, units = "in")
+ggsave("APHA_ovip_rate_south.png", plot = plt, device = "png", height = 9, width = 12, units = "in")
+ggsave("APHA_ovip_model_south.png", plot = preds, device = "png", height = 9, width = 12, units = "in")
+
+
+
 
