@@ -28,3 +28,16 @@ plt <- ggplot(dat, aes(x = Photoperiod, fill = Decision)) +
   ggtitle("Proportion of females reproductive at end of test")
 plt
   
+# how many eggs/reproductive female?
+plt <- ggplot(dat, aes(x = Eggs)) +
+  geom_histogram() +
+  # scale_color_viridis() +
+  # facet_wrap(Population~Temperature) +
+  facet_wrap(Population ~ Photoperiod) +
+  xlab("Photoperiod") +
+  ylab("Count of diapause decision") +
+  ggtitle("Proportion of females reproductive at end of test")
+plt
+  
+
+

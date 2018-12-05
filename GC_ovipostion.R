@@ -48,20 +48,21 @@ dat <- dat %>%
          CumulPropEggs = ifelse(maxtop > 0,
                                 (Eggs_top / maxtop),
                                 0),
-         Eggs_bottom = ifelse(is.na(Eggs_bottom), 
+         Eggs_bottom_imputed = ifelse(is.na(Eggs_bottom), 
                               round(CumulPropEggs * maxbot),
                               Eggs_bottom),
-         Eggs = Eggs_top + Eggs_bottom,
-         NewEggs = c(NA, diff(Eggs))) %>%
+         Eggs = Eggs_top + Eggs_bottom_imputed,
+         NewEggs = c(NA, diff(Eggs)),
+         NumAdultsRaw = StartCount - ifelse(is.na(Dead), 0, Dead),
+         NumAdults = c(NumAdultsRaw[1], (NumAdultsRaw[2:length(NumAdultsRaw)] + NumAdultsRaw[1:(length(NumAdultsRaw)-1)])/2)) %>%
   mutate(NewEggs = ifelse(NewEggs < 0, 0, NewEggs)) %>% 
   mutate(OvipRate = NewEggs / 
            as.numeric(difftime(Date, lag(Date, 1), units = "days")) / 
-           max(c(1, (StartCount - ifelse(is.na(Dead), 0, Dead)))),
+           NumAdults,
          OvipRateDD = NewEggs / 
            c(NA, diff(AccumDD)) / 
-           max(c(1, (StartCount - ifelse(is.na(Dead), 0, Dead)))),
+           NumAdults,
          DDelapsed = c(NA, diff(AccumDD)),
-         NumAdults = max(c(1, (StartCount - ifelse(is.na(Dead), 0, Dead)))),
          RateOffset = log(DDelapsed * NumAdults)) %>% 
   filter(is.na(OvipRate) == FALSE)
 
@@ -69,7 +70,7 @@ dat <- dat %>%
 theme_set(theme_bw(base_size = 22)) 
 
 # can change y to be based on day or degree-day
-plt <- ggplot(dat, aes(x = AccumDD, y = OvipRateDD, group = Photoperiod, color = Photoperiod)) +
+plt <- ggplot(dat, aes(x = AccumDD, y = OvipRate, group = Photoperiod, color = Photoperiod)) +
   geom_point(size = 4, alpha = .5) +
   scale_color_viridis() +
   facet_wrap(Population~Temperature) +
@@ -109,8 +110,8 @@ gammod <- gam(NewEggs ~
               family = poisson(link = "log"))
 
 # poisson way worse than negbin
-gammod <- gam(NewEggs ~ 
-                s(NumAdults)
+gammod1 <- gam(NewEggs ~ 
+                s(NumAdults) +
                 te(AccumDD, Photoperiod, k = c(5, 4), by = TrtFactor) +
                 TrtFactor,
               data = dat, offset = RateOffset,
@@ -122,6 +123,17 @@ gammod1 <- gam(NewEggs ~
                 TrtFactor,
               data = dat, offset = RateOffset,
               family = nb(link = "log"))
+
+# what about spelling out interactions so can be removed for predictions?
+gammod3 <- gam(NewEggs ~ 
+                 s(NumAdults) +
+                 ti(AccumDD, by = Temperature) +
+                 ti(Photoperiod, by = Population) +
+                 ti(AccumDD, Photoperiod, by = TrtFactor) +
+                 Population + Temperature + TrtFactor,
+               data = dat, offset = RateOffset,
+               family = nb(link = "log"))
+
 
 # for mapping, just try southern strain, no difference in temperature
 dat <- dat %>% filter(Population == "S")
@@ -137,29 +149,31 @@ newdat <- expand.grid(AccumDD = seq(0, 300, length.out = 150),
                       RateOffset = log(1),
                       NumAdults = 25)
 newdat <- newdat[-which(newdat$AccumDD > 250 & newdat$TrtFactor %in% c("N_14", "S_14")), ]
-newdat$pred <- predict(gammod1, newdata = newdat, type = "response")
 newdat$Population <- stringr::str_split_fixed(newdat$TrtFactor, pattern = "_", n = 2)[, 1]
 newdat$Temperature <- stringr::str_split_fixed(newdat$TrtFactor, pattern = "_", n = 2)[, 2]
+
+newdat$pred <- predict(gammod3, newdata = newdat, type = "response")
 
 
 preds <- ggplot(newdat, aes(x = AccumDD, y = pred, group = Photoperiod, color = Photoperiod)) +
   geom_line(size = 2) +
   scale_color_viridis(breaks = seq(10, 16, length.out = 3)) +
-  # facet_wrap(Population~Temperature, scales = "free_y") +
+  facet_wrap(Population~Temperature, scales = "free_y") +
   ggtitle("Modeled oviposition rate (eggs/degree-day/adult)") +
   ylab("Predicted oviposition rate") +
-  xlab("Accumulated degree-days (7C base)") +
-  theme(legend.position = c(.2, .7), legend.direction = "vertical", plot.title = element_text(hjust = 0.5))
+  xlab("Accumulated degree-days (7C base)")
+  # theme(legend.position = c(.2, .7), legend.direction = "vertical", plot.title = element_text(hjust = 0.5))
 
 preds
 
 plt <- ggplot(dat, aes(x = AccumDD, y = OvipRateDD, group = Photoperiod, color = Photoperiod)) +
   geom_point(size = 4, alpha = .7) +
   scale_color_viridis(breaks = seq(10, 16, length.out = 3)) +
+  facet_wrap(Population~Temperature, scales = "free_y") +
   xlab("Accumulated degree-days (7C base)") +
   ylab("Observed oviposition rate") +
-  ggtitle("Oviposition rate (eggs/degree-day/adult)") +
-  theme(legend.position = c(.2, .7), legend.direction = "vertical", plot.title = element_text(hjust = 0.5))
+  ggtitle("Oviposition rate (eggs/degree-day/adult)")
+  # theme(legend.position = c(.2, .7), legend.direction = "vertical", plot.title = element_text(hjust = 0.5))
 
 plt
 
