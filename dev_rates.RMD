@@ -62,6 +62,19 @@ shaw_dev <- bind_rows(shaw_list) %>%
   mutate(n = as.numeric(n),
          time1 = as.numeric(time1)) %>% 
   filter(complete.cases(.))
+
+shaw_surv <- bind_rows(shaw_list) %>%
+  rename(neggs = `number of eggs`) %>% 
+  mutate(n = as.numeric(n),
+         time1 = as.numeric(time1)) %>% 
+  group_by(temperature, rep) %>% 
+  summarise(neggs = mean(as.numeric(neggs)),
+            emerged = sum(n, na.rm = TRUE))
+
+# survival much lower at 12C, justification to remove it as outlier
+survmod <- glm(cbind(emerged, neggs) ~ as.character(temperature), family = binomial(link = "logit"), data = shaw_surv)
+summary(survmod)
+
 shaw_dev <- shaw_dev[rep(seq(nrow(shaw_dev)), shaw_dev$n), c("rep", "time1", "temperature")]
 
 
@@ -84,7 +97,9 @@ plt <- ggplot(trans_dev, aes(x = time2)) +
   geom_histogram() +
   # facet_wrap(~temperature, ncol = 1) +
   facet_grid(run~temperature) +
-  theme_bw()
+  theme_bw(base_size = 16) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + 
+  xlab("Days to emerge after moved back to 15C")
 plt
 ```
 ## Analyze with devRate R package
@@ -97,12 +112,24 @@ mod_lin_myint <- devRateModel(eq = lamb_92,
                               startValues <- list(list(Rm = 0.05, Tmax = 30, To = 10), list(T1 = 4)))
 devRatePlot(eq = lamb_92, nlsDR = mod_lin_myint, temp = myint_dev$temperature, devRate = myint_dev$time1^-1)
 
-mod_lin_shaw <- devRateModel(eq = campbell_74,
-                              temp = shaw_dev$temperature,
-                              devRate = shaw_dev$time1^-1)
-devRatePlot(eq = campbell_74, nlsDR = mod_lin_shaw, temp = shaw_dev$temperature, devRate = shaw_dev$time1^-1)
+mod_lin_all <- devRateModel(eq = campbell_74,
+                              temp = lindat$temperature,
+                              devRate = lindat$devRate)
+devRatePlot(eq = campbell_74, nlsDR = mod_lin_all, temp = lindat$temperature,
+                              devRate = lindat$devRate)
+mod_all <- devRateModel(eq = lamb_92,
+                              temp = alldat$temperature,
+                              devRate = alldat$devRate,
+                              startValues <- list(list(Rm = 0.05, Tmax = 30, To = 10), list(T1 = 4)))
+devRatePlot(eq = lamb_92, nlsDR = mod_all, temp = alldat$temperature,
+                              devRate = alldat$devRate)
 
-
+mod_all <- devRateModel(eq = briere1_99,
+                              temp = alldat$temperature,
+                              devRate = alldat$devRate,
+                        startValues = list(aa = 2.3, Tmin = 8, Tmax = 30))
+devRatePlot(eq = briere1_99, nlsDR = mod_all, temp = alldat$temperature,
+                              devRate = alldat$devRate)
 
 ```
 
@@ -142,19 +169,33 @@ rawplt
 ```{r plot preds}
 # exclude outliers, shaw 12C and myint 30C
 lindat <- alldat %>% 
-  filter(temperature != 30) %>% 
+  filter(temperature < 28) %>% 
   filter(!(temperature == 12 & experiment == "shaw"))
-mod <- lm(devRate ~ temperature * experiment, data = lindat)
+mod <- lm(devRate ~ temperature * experiment - 1, data = lindat)
+mod <- lm(devRate ~ temperature, data = lindat)
 
-newdat <- expand.grid(c("myint", "shaw", "transfer"), seq(0, 30, .1))
+newdat <- expand.grid(c("myint", "shaw", "transfer"), seq(0, 30, .01))
 names(newdat) <- c("experiment", "temperature")
 
 newdat$devRate <- predict.lm(mod, newdat)
 newdat <- newdat %>% filter(devRate >= 0)
 
+# all pooled together
 tempmod <- lm(devRate ~ temperature, data = lindat)
 tempdat <- data.frame(temperature = seq(0, 30, .1))
 tempdat$devRate <- predict.lm(tempmod, tempdat)
+tempdat <- tempdat %>% filter(devRate >= 0)
+
+# partial pooling\
+library(lme4)
+mod <- lmer(devRate ~ temperature + (1 + temperature|experiment), data = lindat)
+newdat <- expand.grid(c("myint", "shaw", "transfer"), seq(0, 30, .01))
+names(newdat) <- c("experiment", "temperature")
+newdat$devRate <- predict(mod, newdat)
+newdat <- newdat %>% filter(devRate >= 0)
+
+tempdat <- data.frame(temperature = seq(0, 30, .1))
+tempdat$devRate <- predict(mod, tempdat, re.form = NA)
 tempdat <- tempdat %>% filter(devRate >= 0)
 
 test <- rawplt +
@@ -164,6 +205,19 @@ test <- rawplt +
   ggtitle("Aphalara daily development rate vs constant temperatures")
 test
 ggsave(filename = "AphaDevRate.png", plot = test, device = "png", width = 6, height = 5)
+
+
+# alternative figure
+test <- ggplot(lindat, aes(x = temperature, y = devRate, shape = experiment)) +
+  geom_jitter(alpha = .3, color = "black") +
+  scale_shape_discrete(solid=FALSE) +
+  geom_line(data = tempdat, aes(x = temperature, y = devRate), color = "black", inherit.aes = FALSE, size = 1.2) +
+ theme_bw(base_size = 16) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +   xlab("Temperature (C)") +
+  ylab("Development Rate") +
+  ggtitle("Aphalara daily development rate vs constant temperatures")
+ggsave(filename = "AphaDevRate_BW.png", plot = test, device = "png", width = 6, height = 5)
+
 
 ```
 
@@ -206,11 +260,16 @@ regniere_negLL <- function(params){
 
 
 ```
+
+
+
+
 ```{r fecundity}
 
 fec <- read.csv("data/fecund_myint.csv", header = TRUE)
 
-
+regdat <- fec %>% 
+  mutate(degday = (temperature - 6.9) * preovip_day_est)
 
 
 ```

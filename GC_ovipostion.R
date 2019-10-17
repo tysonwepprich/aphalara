@@ -67,13 +67,16 @@ dat <- dat %>%
   filter(is.na(OvipRate) == FALSE)
 
 
-theme_set(theme_bw(base_size = 22)) 
+theme_set(theme_bw(base_size = 16)) 
+
+
 
 # can change y to be based on day or degree-day
-plt <- ggplot(dat, aes(x = AccumDD, y = OvipRate, group = Photoperiod, color = Photoperiod)) +
-  geom_point(size = 4, alpha = .5) +
+plt <- ggplot(dat, aes(x = AccumDD, y = OvipRateDD, group = Photoperiod, color = Photoperiod)) +
+  geom_point(size = 1, alpha = .9) +
+  geom_path(size = 2, alpha = .5) +
   scale_color_viridis() +
-  facet_wrap(Population~Temperature) +
+  facet_wrap(Population~Temperature, scales = "free_y") +
   xlab("Accumulated degree-days") +
   ylab("Oviposition rate per degree-day per adult") +
   ggtitle("Oviposition rate (new eggs / # deg-days / # adults)")

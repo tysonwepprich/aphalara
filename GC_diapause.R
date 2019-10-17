@@ -7,6 +7,11 @@ library(viridis)
 dat <- readxl::read_xlsx("C:/Users/wepprict/Downloads/Aphalara_GC_2018_diapause.xlsx",
                          na = "NA")
 
+ratio <- dat %>% 
+  group_by(Population, Temperature, Photoperiod) %>% 
+  summarise(NumMales = sum(Males, na.rm = TRUE),
+         NumFemales = sum(Females, na.rm = TRUE))
+
 dat <- dat %>% 
   rowwise() %>% 
   mutate(Eggs = sum(c(Eggs_2, Eggs_3, Eggs_4), na.rm = TRUE)) %>%
